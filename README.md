@@ -1,0 +1,183 @@
+[magicmirror.html](https://github.com/user-attachments/files/32864785/magicmirror.html)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Magic Mirror — Live Mirror</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#05060a; color:#fff; overflow:hidden; }
+
+  /* ---------- landing / consent ---------- */
+  #gate { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:100;
+          background:radial-gradient(ellipse at top, #1b2340 0%, #05060a 70%); }
+  .gate-card { max-width:420px; width:92%; padding:34px 28px; border-radius:22px;
+          background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); backdrop-filter:blur(14px);
+          text-align:center; }
+  .gate-card h1 { font-size:26px; font-weight:700; letter-spacing:.5px; margin-bottom:6px; }
+  .gate-card .sub { font-size:13px; opacity:.65; margin-bottom:22px; }
+  .notice { text-align:left; font-size:13px; line-height:1.55; background:rgba(255,190,60,.12);
+          border:1px solid rgba(255,190,60,.4); color:#ffd98a; border-radius:12px; padding:12px 14px; margin-bottom:20px; }
+  .btn { display:block; width:100%; padding:15px; border:none; border-radius:14px; font-size:16px; font-weight:600;
+          cursor:pointer; margin-bottom:12px; transition:transform .1s; }
+  .btn:active { transform:scale(.97); }
+  .btn-mirror { background:linear-gradient(135deg,#7c5cff,#4d9fff); color:#fff; }
+  .btn-viewer { background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.2); }
+  .viewer-box { display:none; }
+  .viewer-box input { width:100%; padding:14px; border-radius:12px; border:1px solid rgba(255,255,255,.25);
+          background:rgba(255,255,255,.08); color:#fff; font-size:20px; text-align:center; letter-spacing:6px;
+          text-transform:uppercase; outline:none; margin-bottom:12px; }
+  .viewer-box input::placeholder { letter-spacing:2px; font-size:14px; opacity:.4; }
+  .back { background:none; border:none; color:rgba(255,255,255,.5); font-size:13px; cursor:pointer; margin-top:6px; }
+  .err { color:#ff8a8a; font-size:13px; margin-top:10px; min-height:16px; }
+
+  /* ---------- mirror ---------- */
+  #mirror { display:none; position:fixed; inset:0; }
+  #cam { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  .vignette { position:absolute; inset:0; pointer-events:none;
+          box-shadow:inset 0 0 140px 40px rgba(0,0,0,.55);
+          border:10px solid #15161c; border-radius:6px; }
+  .hud { position:absolute; left:0; right:0; padding:22px 26px; display:flex; justify-content:space-between;
+          align-items:flex-start; text-shadow:0 2px 8px rgba(0,0,0,.7); pointer-events:none; }
+  .clock { font-size:15px; line-height:1.4; opacity:.9; }
+  .clock .t { font-size:34px; font-weight:200; }
+  .live { font-size:11px; letter-spacing:1px; background:rgba(255,70,70,.85); padding:5px 10px; border-radius:20px;
+          display:flex; align-items:center; gap:6px; }
+  .dot { width:7px; height:7px; border-radius:50%; background:#fff; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  #code-tag { position:absolute; bottom:14px; right:18px; font-size:11px; opacity:.45; letter-spacing:2px;
+          text-shadow:0 1px 4px #000; }
+  .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:rgba(20,22,30,.92);
+          border:1px solid rgba(255,255,255,.15); padding:12px 18px; border-radius:12px; font-size:13px; z-index:60;
+          opacity:0; transition:opacity .3s; pointer-events:none; max-width:90%; text-align:center; }
+  .toast.show { opacity:1; }
+
+  /* ---------- viewer ---------- */
+  #viewer { display:none; position:fixed; inset:0; background:#000; }
+  #remote { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  .vstatus { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; z-index:5; }
+  .vstatus .big { font-size:20px; margin-bottom:8px; }
+  .vstatus .small { font-size:13px; opacity:.6; }
+  #exit-view { position:fixed; top:16px; right:16px; z-index:10; background:rgba(255,255,255,.12);
+          border:1px solid rgba(255,255,255,.25); color:#fff; padding:9px 16px; border-radius:20px;
+          font-size:13px; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<!-- ============ GATE: choose role + consent ============ -->
+<div id="gate">
+  <div class="gate-card">
+    <h1>🪞 Magic Mirror</h1>
+    <p class="sub">A mirror that shares what it sees with its owner</p>
+
+    <div id="role-choice">
+      <div class="notice">📢 <b>Honesty notice:</b> anyone standing in front of this mirror is shown a message that
+        the camera view is live-streamed to the mirror owner. Use it only on a device you own,
+        where people can see this notice.</div>
+      <button class="btn btn-mirror" onclick="startMirror()">Start the Mirror</button>
+      <button class="btn btn-viewer" onclick="showViewerBox()">I'm the Owner — View Live</button>
+    </div>
+
+    <div class="viewer-box" id="viewer-box">
+      <div class="notice">🔑 Enter the mirror code shown at the bottom-right corner of the mirror screen.</div>
+      <input id="code-input" placeholder="MIRROR CODE" maxlength="6" autocomplete="off">
+      <button class="btn btn-mirror" onclick="startViewer()">Connect</button>
+      <button class="back" onclick="backToRoles()">← back</button>
+      <div class="err" id="view-err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MIRROR MODE ============ -->
+<div id="mirror">
+  <video id="cam" autoplay playsinline muted></video>
+  <div class="vignette"></div>
+  <div class="hud">
+    <div class="clock"><div class="t" id="time">--:--</div><div id="date"></div></div>
+    <div class="live"><div class="dot"></div>LIVE · SHARED WITH OWNER</div>
+  </div>
+  <div id="code-tag"></div>
+</div>
+
+<!-- ============ VIEWER MODE ============ -->
+<div id="viewer">
+  <video id="remote" autoplay playsinline></video>
+  <div class="vstatus" id="vstatus">
+    <div class="big">⏳ Connecting to mirror…</div>
+    <div class="small" id="vsmall">Make sure the mirror is running.</div>
+  </div>
+  <button id="exit-view" onclick="location.reload()">Exit</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const toast = (msg, ms=3500) => { const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),ms); };
+const makeCode = () => { const c='ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let s='';
+  for(let i=0;i<6;i++) s+=c[Math.floor(Math.random()*c.length)]; return s; };
+
+/* ---------------- MIRROR MODE ---------------- */
+async function startMirror(){
+  const code = makeCode();
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:{ideal:1280} }, audio:false }); }
+  catch(e){ toast('📷 Camera permission is required for the mirror.'); return; }
+
+  const peer = new Peer('mirror-' + code.toLowerCase());
+  peer.on('open', () => {
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('mirror').style.display = 'block';
+    document.getElementById('cam').srcObject = stream;
+    document.getElementById('code-tag').textContent = 'MIRROR CODE · ' + code;
+    tick(); setInterval(tick, 1000);
+    toast('✅ Mirror is live. Code: ' + code, 6000);
+  });
+  peer.on('call', call => { call.answer(stream); });   // owner is watching -> send our camera
+  peer.on('error', e => {
+    if (e.type==='unavailable-id') { location.reload(); }   // code collision, retry
+    else toast('⚠️ ' + e.type);
+  });
+}
+function tick(){
+  const d = new Date();
+  document.getElementById('time').textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  document.getElementById('date').textContent = d.toLocaleDateString([], {weekday:'long', month:'long', day:'numeric'});
+}
+
+/* ---------------- VIEWER MODE ---------------- */
+function showViewerBox(){
+  document.getElementById('role-choice').style.display='none';
+  document.getElementById('viewer-box').style.display='block';
+  document.getElementById('code-input').focus();
+}
+function backToRoles(){
+  document.getElementById('viewer-box').style.display='none';
+  document.getElementById('role-choice').style.display='block';
+}
+function startViewer(){
+  const code = document.getElementById('code-input').value.trim().toUpperCase();
+  if (code.length < 4) { document.getElementById('view-err').textContent='Enter the 6-character mirror code.'; return; }
+  const peer = new Peer();
+  peer.on('open', () => {
+    // connect with an empty stream: the mirror answers with its camera feed
+    const call = peer.call('mirror-' + code.toLowerCase(), new MediaStream());
+    call.on('stream', remote => {
+      document.getElementById('viewer').style.display='block';
+      document.getElementById('remote').srcObject = remote;
+      document.getElementById('vstatus').style.display='none';
+    });
+    call.on('close', () => toast('Mirror disconnected.'));
+  });
+  peer.on('error', e => {
+    document.getElementById('view-err').textContent =
+      e.type==='peer-unavailable' ? 'Mirror not found — check the code and make sure the mirror is open.' : 'Error: '+e.type;
+  });
+}
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>
